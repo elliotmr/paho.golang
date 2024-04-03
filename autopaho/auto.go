@@ -69,6 +69,7 @@ type ClientConfig struct {
 	KeepAlive                     uint16      // Keepalive period in seconds (the maximum time interval that is permitted to elapse between the point at which the Client finishes transmitting one MQTT Control Packet and the point it starts sending the next)
 	CleanStartOnInitialConnection bool        //  Clean Start flag, if true, existing session information will be cleared on the first connection (it will be false for subsequent connections)
 	SessionExpiryInterval         uint32      // Session Expiry Interval in seconds (if 0 the Session ends when the Network Connection is closed)
+	AsyncPublish                  bool        // Setting this will use the Async publish command on the underlying paho client when calling Publish for those who don't want to use PublishViaQueue
 
 	ConnectRetryDelay time.Duration    // How long to wait between connection attempts (defaults to 10s)
 	ConnectTimeout    time.Duration    // How long to wait for the connection process to complete (defaults to 10s)
@@ -436,8 +437,9 @@ func (c *ConnectionManager) Unsubscribe(ctx context.Context, u *paho.Unsubscribe
 
 // Publish is used to send a publication to the MQTT server.
 // It is passed a pre-prepared `PUBLISH` packet and blocks waiting for the appropriate response,
-// or for the timeout to fire.
-// Any response message is returned from the function, along with any errors.
+// or for the timeout to fire. Any response message is returned from the function, along with any
+// errors. If the `AsyncPublish` option is set to true, the function will return immediately and
+// PublishResponse will be nil.
 func (c *ConnectionManager) Publish(ctx context.Context, p *paho.Publish) (*paho.PublishResponse, error) {
 	c.mu.Lock()
 	cli := c.cli
@@ -446,7 +448,11 @@ func (c *ConnectionManager) Publish(ctx context.Context, p *paho.Publish) (*paho
 	if cli == nil {
 		return nil, ConnectionDownError
 	}
-	return cli.Publish(ctx, p)
+	o := paho.PublishOptions{Method: paho.PublishMethod_Blocking}
+	if c.cfg.AsyncPublish {
+		o.Method = paho.PublishMethod_AsyncSend
+	}
+	return cli.PublishWithOptions(ctx, p, o)
 }
 
 // QueuePublish holds info required to publish a message. A separate struct is used so options can be added in the future
